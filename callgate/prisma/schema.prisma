@@ -1,0 +1,42 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  name         String?
+  firstname    String?
+  lastname     String?
+  roomsAsAdmin Room[]
+  rooms        UserRoom[]
+}
+
+model Room {
+  id      String     @id @default(uuid())
+  code    String
+  adminId String?
+  admin   User?      @relation(fields: [adminId], references: [id])
+  users   UserRoom[]
+}
+
+model UserRoom {
+  id     String @id @default(uuid())
+  userId String
+  roomId String
+  room   Room   @relation(fields: [roomId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@unique([userId, roomId])
+}
+
+enum Role {
+  ADMIN
+  USER
+}
