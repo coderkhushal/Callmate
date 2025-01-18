@@ -70,11 +70,6 @@ const JoinState = ({ children }: { children: React.ReactNode }) => {
 
     // find the user in the database
     const tempcurrentuser = await findUser(user.user?.emailAddresses[0].emailAddress);
-<<<<<<< HEAD
-
-=======
-    console.log(tempcurrentuser)
->>>>>>> 44f1823 (webrtc changes)
     setcurrentuser((value) => tempcurrentuser)
 
     // if the user is not found in the database

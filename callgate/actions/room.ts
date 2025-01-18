@@ -17,9 +17,6 @@ export const createroom = async ({ code, admin }: { code: string, admin: User })
 }
 export const joinroom= async(roomid: string , user: User)=>{
     try{
-<<<<<<< HEAD
-        
-=======
         let isJoined = await prisma.userRoom.findFirst({
             where:{
                 userId:user.id, 
@@ -29,7 +26,6 @@ export const joinroom= async(roomid: string , user: User)=>{
         if(isJoined){
             return true;
         }
->>>>>>> 44f1823 (webrtc changes)
         let updatedroom = await prisma.userRoom.create({
             data: {
                 userId: user.id,

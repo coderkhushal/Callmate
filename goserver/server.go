@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 
@@ -51,8 +52,9 @@ func broadcast() {
 			if err := client.Conn.WriteJSON(msg.Message); err != nil {
 				Allrooms.RemoveFromRoom(msg.RoomId, client.Conn)
 
-				log.Fatal(err)
+				log.Println("write error", err)
 				client.Conn.Close()
+				continue
 			}
 
 		}
@@ -77,22 +79,29 @@ func JoinRoomHandler(w http.ResponseWriter, r *http.Request) {
 		log.Fatal("websocket upgrade error", err)
 	}
 	Allrooms.InsertIntoRoom(roomId[0], false, ws)
-
+	defer func() {
+		fmt.Printf("(%s) left \n")
+		Allrooms.RemoveFromRoom(roomId[0], ws)
+		ws.Close()
+	}()
+	go broadcast()
 	for {
 		var msg broadCastMsg
 		err := ws.ReadJSON(&msg.Message)
+		fmt.Println("message recieved \n")
 		if err != nil {
-			if err == websocket.ErrCloseSent {
-				Allrooms.RemoveFromRoom(roomId[0], ws)
-				ws.Close()
-				continue
+
+			if websocket.IsUnexpectedCloseError(err) {
+				fmt.Println("unexpected close error \n", err)
+				break
 			}
 			log.Println("read error :", err)
+			break
 		}
 		msg.client = ws
 		msg.RoomId = roomId[0]
 
-		log.Println(msg.Message)
+		log.Println("msg recvd :", msg.Message)
 
 		broadcastch <- msg
 

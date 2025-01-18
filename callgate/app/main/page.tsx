@@ -5,7 +5,6 @@ import axios from "axios"
 import { UserButton, useUser } from "@clerk/nextjs";
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm } from "react-hook-form"
-import { gsap } from "gsap";
 import { Button } from "@/components/ui/button"
 import {
     Dialog,
@@ -16,7 +15,6 @@ import {
     DialogTitle,
     DialogTrigger,
 } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
 import {
     Form,
     FormControl,
@@ -70,22 +68,26 @@ export default function Home() {
         }
 
         try {
-            axios.get(`${SERVER}/room/newroom`).then(async (res) => {
+            axios.get(`${SERVER}/create`).then(async (res) => {
 
                 if (res.status == 429) {
                     alert("Too many requests, please try again later")
                     return;
                 }
-                const admin = await findUser(user.user?.emailAddresses[0].emailAddress)
+                
+                
+                
+                const admin = await findUser(user.user?.emailAddresses[0].emailAddress!)
                 console.log(admin)
                 if (!admin) {
                     alert("user not found in database")
                     return;
                 }
-                let roomid = await createroom({ code: res.data, admin: admin })
+                let roomid = await createroom({ code: res.data.room_id, admin: admin! })
+                console.log(roomid)
                 setroomid(roomid)
                 setisAdmin(true)
-                router.push(res.data)
+                router.push(res.data.room_id)
 
 
             })
