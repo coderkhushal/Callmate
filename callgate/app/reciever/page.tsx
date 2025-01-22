@@ -7,54 +7,65 @@ const RecieverPage = () => {
     const PeerRef = useRef<RTCPeerConnection | null>(null)
     useEffect(()=>{
         const roomId = "defaultroom"
-WebsocketRef.current = new WebSocket(SERVER + "/join?roomId=" + roomId)
-WebsocketRef.current.onopen = () => {
-    console.log("WebSocket connected");
-    if(!WebsocketRef.current){
-        return
-    }
-    WebsocketRef.current.send(JSON.stringify({ recieve: true }));
-
+        WebsocketRef.current = new WebSocket(SERVER + "/join?roomId=" + roomId)
+        WebsocketRef.current.onopen = () => {
+        console.log("WebSocket connected");
     };       
-    startRecieving()
+        startAccepting()
+        WebsocketRef.current.addEventListener("message", async (event)=>{
+            const message = JSON.parse(event.data)
+            console.log(message)
+            if(message.ice){
+            console.log("ice candidate recieved")
+            PeerRef.current?.addIceCandidate(new RTCIceCandidate(message.ice)).catch(err =>{
+            console.log("error while adding ice candidate " , err)
+            })
+        }
+        else if(message.sdp){
+            console.log("sdp recieved")
+            await PeerRef.current?.setRemoteDescription(new RTCSessionDescription(message.sdp)).catch(err =>{
+            console.log("error while setting remote description")
+            })
+            const ans = await PeerRef.current?.createAnswer()
+            await PeerRef.current?.setLocalDescription(ans)
+            WebsocketRef.current?.send(JSON.stringify({sdp: ans}))
+
+
+        }
+        })
     return (()=>{
         WebsocketRef.current?.close()
-        PeerRef.current?.close()
-        document.querySelectorAll("video").forEach((video)=>{
-            video.remove()
-    })
     })
     },[SERVER])
 
-
-    const startRecieving = () => {
-        const video = document.createElement("video");
-        document.body.appendChild(video);
-
-        PeerRef.current = new RTCPeerConnection({
-            iceServers: [{ urls: ["stun:stun.l.google.com:19302", 'stun:stun3.l.google.com:19302'] }],
-        });
-
-        PeerRef.current.ontrack = (event) => {
-            if (video.srcObject) {
-                (video.srcObject as MediaStream).addTrack(event.track);
-            } else {
-                video.srcObject = new MediaStream([event.track]);
-            }
-            video.play();
-        };
-
-        PeerRef.current.onicecandidate = (event) => {
-            if(!WebsocketRef.current){
-                return
-            }
-            if (event.candidate && WebsocketRef.current?.readyState === WebSocket.OPEN) {
-                WebsocketRef.current.send(JSON.stringify({ iceCandidate: event.candidate }));
-            }
-        };
-    };
+    const startAccepting = async()=>{
+        PeerRef.current  = createPeer()
+        PeerRef.current?.addTransceiver("video", {direction: "recvonly"})
+        
+    }
+    const createPeer = (): (RTCPeerConnection | null ) =>{
+        try{
+            const peer = new RTCPeerConnection({
+                iceServers: [{ urls: "stun:stun.stunprotocol.org" }],
+            });
+            peer.ontrack = handleTrackEvent
+            return peer
+        }
+        catch(er){
+            console.log("error while creating peer " , er)
+            return null
+        }
+    }
+    const handleTrackEvent= (event : RTCTrackEvent) =>{
+        const VideoElement = document.getElementById("incomingvideo") as HTMLVideoElement
+        VideoElement.srcObject = new MediaStream([event.track])
+        VideoElement.play()
+    }
   return (
-    <div>RecieverPage</div>
+    <div>
+        RecieverPage
+        <video id="incomingvideo"></video>
+    </div>
   )
 }
 

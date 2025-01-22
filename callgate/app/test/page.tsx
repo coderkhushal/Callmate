@@ -196,85 +196,95 @@ const TestPage = () => {
     const PeerRef = useRef<RTCPeerConnection | null>(null)
     useEffect(()=>{
         const roomId = "defaultroom"
-WebsocketRef.current = new WebSocket(SERVER + "/join?roomId=" + roomId)
-WebsocketRef.current.onopen = () => {
-    console.log("WebSocket connected");
-    if(!WebsocketRef.current){
-        return
-    }
-    WebsocketRef.current.send(JSON.stringify({ join: true }));
-    };       
+        WebsocketRef.current = new WebSocket(SERVER + "/join?roomId=" + roomId)
+        WebsocketRef.current.onopen = () => {
+        console.log("WebSocket connected");
+        if(!WebsocketRef.current){
+          console.log("Websocket not connected")
+          return 
+        }
+        WebsocketRef.current.send(JSON.stringify({join: true}))
+      };       
+      WebsocketRef.current.addEventListener("message", (event)=>{
+        const message = JSON.parse(event.data)
+        if(message.sdp){
+          PeerRef.current?.setRemoteDescription(new RTCSessionDescription(message.sdp)).catch(err =>{
+            console.log("error while setting remote description " , err)
+          })
+        }
+        if (message.ice){
+          PeerRef.current?.addIceCandidate(new RTCIceCandidate(message.ice)).catch(err =>{
+            console.log("error while adding ice candidate " , err)
+          })
+        }
+      })
+        
+        return (()=>{
+          WebsocketRef.current?.close()
+        })
     },[SERVER])
     
-    const initiate = ()=>{
-        if(!WebsocketRef.current){
-            alert("socket not found")
-return
+    const initstate = async()=>{
+      const stream = await navigator.mediaDevices.getUserMedia({video: true});
+      const videoElement = (document.getElementById("video") as HTMLVideoElement)
+
+      videoElement.srcObject = stream;
+      videoElement.play()
+
+      PeerRef.current = createPeer()
+      stream.getTracks().forEach((track)=>{
+        PeerRef.current?.addTrack(track, stream)
+      })
+      
+    }
+    const createPeer = ():  (RTCPeerConnection | null)  =>{
+      try{
+
+        const peer   = new RTCPeerConnection({
+          iceServers: [{ urls: "stun:stun.stunprotocol.org" }],
+        });
+
+        peer.onnegotiationneeded = ()=> handleOnNegotiationNeeded(peer)
+        peer.onicecandidate = (e)=>{
+          if(e.candidate){
+            WebsocketRef.current?.send(JSON.stringify({ice: e.candidate}))
+          }
         }
-        WebsocketRef.current.addEventListener("message",async (e) => {
-            console.log("WebSocket message received:", e.data);
-            try {
-              const message = JSON.parse(e.data);
-                if(message.createAnswer){
 
-                      await PeerRef.current?.setRemoteDescription(message.sdp)
-                }
-                else if(message.iceCandidate){
-                    
-                    PeerRef.current?.addIceCandidate(message.candidate)
-                }
-            } catch (err) {
-              console.error("Error parsing WebSocket message:", err);
-            }
-          })
+        return peer
+      }
+      catch(er){
+        console.log("error while creating peer " , er)
+        return null
 
-          PeerRef.current = new RTCPeerConnection(
-            {
-            iceServers: [{ urls: ["stun:stun.l.google.com:19302", 'stun:stun3.l.google.com:19302'] }],
-          }
-        );
-
-          PeerRef.current.onicecandidate = (event) =>{
-            if(event.candidate) {
-                WebsocketRef.current?.send(JSON.stringify({iceCandidate: true, candidate:  event.candidate}))
-            }
-          }
-
-          PeerRef.current.onnegotiationneeded = async()=>{
-            console.log("onnegotiation needed")
-            const offer = await PeerRef.current?.createOffer()
-            if(!offer){
-                console.log("offer not found")
-                return
-            }
-            await PeerRef.current?.setLocalDescription(offer)
-            WebsocketRef.current?.send(JSON.stringify({createOffer: true, sdp: PeerRef.current?.localDescription}))
-          }
-
-          getCameraStreamAndSend()
+      }
+      
     }
-    const getCameraStreamAndSend = ()=>{
-        navigator.mediaDevices.getUserMedia({video: true}).then((stream)=>{
-            const video = document.createElement("video")
-            video.srcObject = stream
-            video.play()
-
-            document.body.appendChild(video)
-            stream.getTracks().forEach(track=>{
-                console.error("track added")
-                console.log(track)
-                console.log(PeerRef.current)
-                PeerRef.current?.addTrack(track, stream)
-                
-            })
-
-        })
+    const handleOnNegotiationNeeded= async(peer :RTCPeerConnection)=>{
+      try{
+        const offer = await peer.createOffer()
+        await peer.setLocalDescription(offer)
+        if(WebsocketRef.current){
+          console.log("sdp sent", peer.localDescription)
+          WebsocketRef.current.send(JSON.stringify({sdp: peer.localDescription }))
+        }
+        else{
+          console.log("error sending sdp")
+          return 
+        }
+      }
+      catch(er){
+        console.log("error while creating offer " , er)
+      }
     }
+
+
   return (
     <div>
-        <button onClick={initiate}>
+        <button onClick={initstate}>
             send
         </button>
+        <video id = "video"></video>
     </div>
 
   )

@@ -9,7 +9,9 @@ import MessageMain from '@/components/Chatting/MessageMain'
 import { toast } from '@/components/ui/use-toast'
 import { ToastAction } from '@radix-ui/react-toast'
 import { MessageType } from '@/types'
+import axios from 'axios'
 const SERVER = process.env.NEXT_PUBLIC_SERVER
+const API_SERVER = process.env.NEXT_PUBLIC_API_SERVER
 const CallingPage = () => {
   const user = useUser()
   const router = useRouter()
@@ -26,7 +28,8 @@ const CallingPage = () => {
   // VIDEO CALLING SERVICE 
   const userVideo = React.useRef<HTMLVideoElement>(null)
   const userStream = useRef<MediaStream | null>(null)
-  const peerRef = useRef<RTCPeerConnection | null>(null)
+  const StreambroadCastingRef = useRef<RTCPeerConnection | null>(null)
+  const StreamReceivingRef = useRef<RTCPeerConnection | null>(null)
   const partnerVideo = React.useRef<HTMLVideoElement>(null)
   const WebSocketRef = useRef<WebSocket | null>(null)
 
@@ -48,8 +51,9 @@ const CallingPage = () => {
       //rendering user video
       userVideo.current.srcObject = stream
       userStream.current = stream
-      callUser()
+      broadCast(stream)
     }
+
   }
 
   const registerChat = (payload: any) => {
@@ -90,28 +94,32 @@ const CallingPage = () => {
       }
     }
   }
-  const registerVideo = (payload: any) => {
-    if (payload.join) {
-      callUser()
-    }
-    else if (payload.offer) {
-      handleOffer(payload.offer)
-    }
-    else if (payload.iceCandidate) {
+  // const registerVideo = (payload: any) => {
+  //   if (payload.join) {
+  //     callUser()
+  //   }
+  //   else if (payload.offer) {
+  //     handleOffer(payload.offer)
+  //   }
+  //   else if (payload.iceCandidate) {
 
-      peerRef.current?.addIceCandidate(new RTCIceCandidate(payload.iceCandidate));
-    }
-    else if (payload.answer) {
+  //     peerRef.current?.addIceCandidate(new RTCIceCandidate(payload.iceCandidate));
+  //   }
+  //   else if (payload.answer) {
 
-      peerRef.current?.setRemoteDescription(new RTCSessionDescription(payload.answer));
-    }
-  }
-  useEffect(() => {
-    // If the use is not admin only then check the admin status
+    //     peerRef.current?.setRemoteDescription(new RTCSessionDescription(payload.answer));
+    //   }
+    // }
+    useEffect(() => {
+      // If the use is not admin only then check the admin status
+      
+      WebSocketRef.current = new WebSocket(SERVER + "/join?roomId=" + pathname.split("/")[1])
+      
+      WebSocketRef.current.onopen = () => {
 
-    WebSocketRef.current = new WebSocket(SERVER + "/join?roomId=" + pathname.split("/")[1])
-
-    WebSocketRef.current.addEventListener("message", (msg: any) => {
+      startRecieving()
+      }
+      WebSocketRef.current.addEventListener("message", (msg: any) => {
       console.log(msg.data)
       const data: { messageType: MessageType, payload: any } = JSON.parse(msg.data)
       
@@ -119,14 +127,13 @@ const CallingPage = () => {
         case MessageType.CHAT:
           registerChat(data.payload)
           break;
-        case MessageType.VIDEO:
-          registerVideo(data.payload)
-          break;
+        // case MessageType.VIDEO:
+        //   registerVideo(data.payload)
+        //   break;
         case MessageType.OPERATION:
           registerOperations(data.payload)
       }
     })
-
 
 
     return (() => {
@@ -134,7 +141,83 @@ const CallingPage = () => {
       WebSocketRef.current = null
     })
   },[SERVER])
+  
+  const startRecieving = async () => {
+    console.log("started recieving")
+    StreamReceivingRef.current = createPeer("RECIEVER")
+    StreamReceivingRef.current?.addTransceiver("video", { direction: "recvonly" })
 
+  }
+  const broadCast = async(stream :MediaStream)=>{
+    StreambroadCastingRef.current = createPeer("SENDER")
+    stream.getTracks().forEach((track: any) => {
+      StreambroadCastingRef.current?.addTrack(track, stream)
+    })
+
+  }
+  const createPeer = (type : "RECIEVER"| "SENDER"): (RTCPeerConnection | null) =>{
+    try{
+      const peer = new RTCPeerConnection({
+        iceServers: [{ urls: "stun:stun.stunprotocol.org" }],
+      })
+      peer.ontrack = handleTrackEvent
+      peer.onnegotiationneeded  = ()=>{
+        if(type=="SENDER"){
+
+          handleNegotitionNeededSender()
+        }
+        else{
+          handleNegotitionNeededReciever()
+
+        }
+      }
+      return peer
+    }
+    catch(err){
+      console.log("error while creating peer ", err)
+      return null
+    }
+  }
+  const handleTrackEvent = (event: RTCTrackEvent) => {
+    if(!partnerVideo.current) return;
+
+  partnerVideo.current.srcObject = new MediaStream([event.track])    
+  partnerVideo.current?.play()
+  }
+
+  const handleNegotitionNeededReciever =async ()=>{
+    
+    if(StreamReceivingRef.current){
+
+    const offer = await StreamReceivingRef.current.createOffer()
+    await StreamReceivingRef.current.setLocalDescription(offer)
+    const payload = {
+      sdp : StreamReceivingRef.current.localDescription
+    }
+    const response = await axios.post(API_SERVER + "/recieve?roomId="+ pathname.split("/")[1], payload)
+    const answer = new RTCSessionDescription(response.data)
+    await StreamReceivingRef.current.setRemoteDescription(answer)
+    console.log("recieved answer")
+    StreamReceivingRef.current.ontrack = handleTrackEvent
+    
+    }
+  }
+  const handleNegotitionNeededSender =async ()=>{
+    
+    if(StreamReceivingRef.current){
+
+    const offer = await StreamReceivingRef.current.createOffer()
+    await StreamReceivingRef.current.setLocalDescription(offer)
+    const payload = {
+      sdp : StreamReceivingRef.current.localDescription
+    }
+    const response = await axios.post(API_SERVER + "/broadcast?roomId="+pathname.split("/")[1 ], payload)
+    if(response.status==200){
+      console.log("broadcasted")
+    }
+    
+    }
+  }
   useEffect(() => {
 
     if (!secure) {
@@ -236,104 +319,6 @@ const CallingPage = () => {
     router.push("/main")
 
   }
-
-  const handleOffer = async (offer: RTCSessionDescriptionInit) => {
-    console.log("Received Offer, Creating Answer");
-    if (!userStream.current) {
-      console.log("User Stream not found");
-      return
-    }
-    peerRef.current = createPeer();
-
-    await peerRef.current.setRemoteDescription(
-      new RTCSessionDescription(offer)
-    );
-
-    await userStream.current?.getTracks().forEach((track) => {
-      peerRef.current?.addTrack(track, userStream.current!);
-    });
-
-    const answer = await peerRef.current.createAnswer();
-    await peerRef.current.setLocalDescription(answer);
-
-    WebSocketRef.current?.send(JSON.stringify(
-      {
-        messageType: MessageType.VIDEO,
-        payload: {
-          offer: true, 
-          room: pathname.split("/")[1],
-          answer: peerRef.current.localDescription
-        }
-      }
-    ))
-  };
-  const callUser = async () => {
-    console.log("Calling Other User");
-    if (userStream.current) {
-
-      peerRef.current = createPeer();
-
-      userStream.current.getTracks().forEach(async (track) => {
-        peerRef.current?.addTrack(track, userStream.current!);
-      });
-    }
-    else {
-      console.log("User Stream not found");
-    }
-  };
-  const createPeer = () => {
-    console.log("Creating Peer Connection");
-    const peer = new RTCPeerConnection({
-      iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
-    });
-
-    peer.onnegotiationneeded = handleNegotiationNeeded;
-    peer.onicecandidate = handleIceCandidateEvent;
-    peer.ontrack = handleTrackEvent;
-
-    return peer;
-  };
-  const handleNegotiationNeeded = async () => {
-    console.log("Creating Offer");
-
-    try {
-      const myOffer = await peerRef.current?.createOffer();
-      await peerRef.current?.setLocalDescription(myOffer);
-      WebSocketRef?.current?.send(JSON.stringify({
-        answer: true, 
-        messageType: MessageType.VIDEO,
-        payload: {
-
-          offer: peerRef.current?.localDescription
-        }
-      }))
-    } catch (err) { }
-  };
-
-  const handleIceCandidateEvent = async (e: RTCPeerConnectionIceEvent) => {
-    console.log("Found Ice Candidate");
-    if (e.candidate) {
-      console.log(e.candidate);
-
-      WebSocketRef?.current?.send(JSON.stringify({
-
-        messageType: MessageType.VIDEO,
-        payload: {
-          
-          iceCandidate: e.candidate
-        }
-      }))
-    }
-
-  };
-
-  const handleTrackEvent = (e: RTCTrackEvent) => {
-    console.log("Received Tracks");
-    console.log(e.streams)
-    if (partnerVideo.current) {
-      partnerVideo.current.srcObject = e.streams[0];
-    }
-  };
 
 
 
